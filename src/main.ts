@@ -1,5 +1,27 @@
 import * as core from '@actions/core'
-import { wait } from './wait'
+import * as fs from 'fs/promises'
+import path from 'path'
+const pkg = require('../package.json')
+
+enum RsStatus {
+  Completed = 'success',
+  Failed = 'fail'
+}
+
+type RsMeta = {
+  status: RsStatus
+  code: string
+  message: string
+}
+
+type Result = {
+  url: string
+}
+
+type Response = {
+  response: RsMeta
+  result?: Result
+}
 
 /**
  * The main function for the action.
@@ -7,18 +29,78 @@ import { wait } from './wait'
  */
 export async function run(): Promise<void> {
   try {
-    const ms: string = core.getInput('milliseconds')
+    const token: string = core.getInput('api_token', { required: true })
+    const projectId: string = core.getInput('project_id', { required: true })
+    const language: string = core.getInput('language', { required: true })
+    const outputType: string = core.getInput('output_type', { required: true })
 
-    // Debug logs are only output if the `ACTIONS_STEP_DEBUG` secret is true
-    core.debug(`Waiting ${ms} milliseconds ...`)
+    const userAgent = `github/poeditor-export-action/v${pkg.version}`
+    const form = new FormData()
 
-    // Log the current timestamp, wait, then log the new timestamp
-    core.debug(new Date().toTimeString())
-    await wait(parseInt(ms, 10))
-    core.debug(new Date().toTimeString())
+    form.set('api_token', token)
+    form.set('id', projectId)
+    form.set('language', language)
+    form.set('type', outputType)
 
-    // Set outputs for other workflow steps to use
-    core.setOutput('time', new Date().toTimeString())
+    core.info(
+      `Downloading translation file for ${projectId}/${language} in format ${outputType} ...`
+    )
+
+    const createExportRs = await fetch(
+      'https://api.poeditor.com/v2/projects/export',
+      {
+        method: 'POST',
+        body: form,
+        headers: new Headers({
+          'User-Agent': userAgent
+        })
+      }
+    )
+
+    core.debug('Got export response, parsing JSON...')
+
+    const exportBody = (await createExportRs.json()) as Response
+
+    core.debug(`Export response: ${JSON.stringify(exportBody)}`)
+
+    if (exportBody.response.status === RsStatus.Failed || !exportBody.result) {
+      core.setFailed(
+        `Export request errored with status code ${exportBody.response.code}: ${exportBody.response.message}`
+      )
+      return
+    }
+
+    core.debug(`Fetching translation at ${exportBody.result.url}...`)
+
+    const exportFileRs = await fetch(exportBody.result.url, {
+      headers: new Headers({
+        'User-Agent': userAgent
+      })
+    })
+
+    core.debug('Got file response, processing...')
+
+    const exportFileContents = await exportFileRs.text()
+
+    core.info('Downloaded')
+    core.debug(`File length: ${exportFileContents.length} characters`)
+
+    if (!process.env['RUNNER_TEMP']) {
+      core.setFailed('Cannot access temporary directory')
+      return
+    }
+
+    const outputPath = path.resolve(
+      process.env['RUNNER_TEMP'],
+      `${projectId}-${language}-${outputType}`
+    )
+
+    core.debug(`Writing output to temporary file ${outputPath}`)
+
+    await fs.writeFile(outputPath, exportFileContents, 'utf8')
+
+    core.setOutput('file_path', outputPath)
+    core.info('Export saved')
   } catch (error) {
     // Fail the workflow run if an error occurs
     if (error instanceof Error) core.setFailed(error.message)

@@ -1,18 +1,25 @@
-name: 'The name of your action here'
-description: 'Provide a description here'
-author: 'Your name or organization here'
+name: 'POEditor Export'
+description: 'Exports translation file'
+author: 'Stanislav Cherenkov'
 
-# Define your inputs here.
 inputs:
-  milliseconds:
-    description: 'Your input description here'
+  api_token:
+    description: 'POEditor API token, read-only is enough'
     required: true
-    default: '1000'
+  project_id:
+    description: 'The exported project ID'
+    required: true
+  language:
+    description: 'The exported language code'
+    required: true
+    default: en
+  output_type:
+    description: 'The file format, see https://poeditor.com/docs/api#projects_export'
+    required: true
 
-# Define your outputs here.
 outputs:
-  time:
-    description: 'Your output description here'
+  file_path:
+    description: 'Exported translation file path'
 
 runs:
   using: node20
